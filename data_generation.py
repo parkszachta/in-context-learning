@@ -1,46 +1,224 @@
-import argparse
-import random
-import json
-from tqdm import tqdm
+import torch
 
-parser = argparse.ArgumentParser(
-    description="Generate piecewise linear functions and sample points, then store the data in a JSON file."
-)
-parser.add_argument("--num_functions", type=int, default=10,
-                    help="Number of functions to generate (default: 10)")
-parser.add_argument("--num_points", type=int, default=100,
-                    help="Number of x points to sample per function (default: 100)")
-parser.add_argument("--seed", type=int, default=282,
-                    help="Random seed for reproducibility (default: 282)")
-parser.add_argument("--lower_bound", type=float, default=-10.0,
-                    help="Lower bound for sampling x (default: -10.0)")
-parser.add_argument("--upper_bound", type=float, default=10.0,
-                    help="Upper bound for sampling x (default: 10.0)")
-parser.add_argument("--output_file", type=str, default="data.json",
-                    help="Output JSON file name (default: data.json)")
-args = parser.parse_args()
-random.seed(args.seed)
-if args.lower_bound >= args.upper_bound:
-    raise ValueError("Error: lower_bound must be less than upper_bound.")
-with open(args.output_file, "w") as f:
-    f.write("[\n")
-    for i in tqdm(range(args.num_functions), desc="Generating functions"):
-        a = random.gauss(0, 1)
-        b = random.gauss(0, 1)
-        c = random.gauss(0, 1)
-        d = random.gauss(0, 1)
-        e = random.gauss(0, 1)
-        x_values = [random.uniform(args.lower_bound, args.upper_bound) for _ in range(args.num_points)]
-        fx_values = [a * x + b if x < c else d * x + e for x in x_values]
-        func_dict = {
-            "parameters": {"a": a, "b": b, "c": c, "d": d, "e": e},
-            "x": x_values,
-            "f_x": fx_values
-        }
-        json_str = json.dumps(func_dict, indent=2)
-        if i < args.num_functions - 1:
-            f.write(json_str + ",\n")
+# Adapted from the paper's code
+
+def squared_error(ys_pred, ys):
+    return (ys - ys_pred).square()
+
+def mean_squared_error(ys_pred, ys):
+    return (ys - ys_pred).square().mean()
+
+def accuracy(ys_pred, ys):
+    return (ys == ys_pred.sign()).float()
+
+class DataSampler:
+    def __init__(self, n_dims):
+        self.n_dims = n_dims
+
+    def sample_xs(self):
+        raise NotImplementedError
+
+class GaussianSampler(DataSampler):
+    def __init__(self, n_dims, bias=None, scale=None):
+        super().__init__(n_dims)
+        self.bias = bias
+        self.scale = scale
+
+    def sample_xs(self, n_points, b_size, n_dims_truncated=None, seeds=None):
+        if seeds is None:
+            xs_b = torch.randn(b_size, n_points, self.n_dims)
         else:
-            f.write(json_str + "\n")
-    f.write("]\n")
-print(f"Data written to {args.output_file}")
+            xs_b = torch.zeros(b_size, n_points, self.n_dims)
+            generator = torch.Generator()
+            assert len(seeds) == b_size
+            for i, seed in enumerate(seeds):
+                generator.manual_seed(seed)
+                xs_b[i] = torch.randn(n_points, self.n_dims, generator=generator)
+        if self.scale is not None:
+            xs_b = xs_b @ self.scale
+        if self.bias is not None:
+            xs_b += self.bias
+        if n_dims_truncated is not None:
+            xs_b[:, :, n_dims_truncated:] = 0
+        return xs_b
+
+def get_data_sampler(data_name, n_dims, **kwargs):
+    names_to_classes = {
+        "gaussian": GaussianSampler,
+    }
+    if data_name in names_to_classes:
+        sampler_cls = names_to_classes[data_name]
+        return sampler_cls(n_dims, **kwargs)
+    else:
+        print("Unknown sampler")
+        raise NotImplementedError
+
+class Task:
+    def __init__(self, n_dims, batch_size, pool_dict=None, seeds=None):
+        self.n_dims = n_dims
+        self.b_size = batch_size
+        self.pool_dict = pool_dict
+        self.seeds = seeds
+        assert pool_dict is None or seeds is None
+
+    def evaluate(self, xs):
+        raise NotImplementedError
+
+    @staticmethod
+    def generate_pool_dict(n_dims, num_tasks):
+        raise NotImplementedError
+
+    @staticmethod
+    def get_metric():
+        raise NotImplementedError
+
+    @staticmethod
+    def get_training_metric():
+        raise NotImplementedError
+
+def get_task_sampler(
+    task_name, n_dims, batch_size, pool_dict=None, num_tasks=None, **kwargs
+):
+    task_names_to_classes = {
+        "linear_regression": LinearRegression,
+        "piecewise_linear_regression": PiecewiseLinearRegression
+    }
+    if task_name in task_names_to_classes:
+        task_cls = task_names_to_classes[task_name]
+        if num_tasks is not None:
+            if pool_dict is not None:
+                raise ValueError("Either pool_dict or num_tasks should be None.")
+            pool_dict = task_cls.generate_pool_dict(n_dims, num_tasks, **kwargs)
+        return lambda **args: task_cls(n_dims, batch_size, pool_dict, **args, **kwargs)
+    else:
+        print("Unknown task")
+        raise NotImplementedError
+
+class LinearRegression(Task):
+    def __init__(self, n_dims, batch_size, pool_dict=None, seeds=None, scale=1):
+        """scale: a constant by which to scale the randomly sampled weights."""
+        super(LinearRegression, self).__init__(n_dims, batch_size, pool_dict, seeds)
+        self.scale = scale
+        if pool_dict is None and seeds is None:
+            self.w_b = torch.randn(self.b_size, self.n_dims, 1)
+        elif seeds is not None:
+            self.w_b = torch.zeros(self.b_size, self.n_dims, 1)
+            generator = torch.Generator()
+            assert len(seeds) == self.b_size
+            for i, seed in enumerate(seeds):
+                generator.manual_seed(seed)
+                self.w_b[i] = torch.randn(self.n_dims, 1, generator=generator)
+        else:
+            assert "w" in pool_dict
+            indices = torch.randperm(len(pool_dict["w"]))[:batch_size]
+            self.w_b = pool_dict["w"][indices]
+
+    def evaluate(self, xs_b):
+        w_b = self.w_b.to(xs_b.device)
+        ys_b = self.scale * (xs_b @ w_b)[:, :, 0]
+        return ys_b
+
+    @staticmethod
+    def generate_pool_dict(n_dims, num_tasks, **kwargs):  # ignore extra args
+        return {"w": torch.randn(num_tasks, n_dims, 1)}
+
+    @staticmethod
+    def get_metric():
+        return squared_error
+
+    @staticmethod
+    def get_training_metric():
+        return mean_squared_error
+
+class PiecewiseLinearRegression(Task):
+    def __init__(self, n_dims, batch_size, pool_dict=None, seeds=None, scale=1):
+        """
+        Implements a piecewise linear function:
+            f(x) = a*x + b if x < c, and f(x) = d*x + e otherwise.
+        Each task instance gets its own set of parameters.
+
+        scale: a constant factor to scale the predictions.
+        """
+        super(PiecewiseLinearRegression, self).__init__(n_dims, batch_size, pool_dict, seeds)
+        self.scale = scale
+
+        # Generate parameters in one of three ways:
+        # 1. If neither pool_dict nor seeds is provided, sample parameters normally.
+        #    We store parameters as a tensor of shape (batch_size, 5),
+        #    where each row is [a, b, c, d, e].
+        if pool_dict is None and seeds is None:
+            self.params = torch.randn(self.b_size, 5)
+        # 2. If seeds are provided, generate parameters reproducibly.
+        elif seeds is not None:
+            self.params = torch.zeros(self.b_size, 5)
+            generator = torch.Generator()
+            assert len(seeds) == self.b_size, "Number of seeds must match batch_size."
+            for i, seed in enumerate(seeds):
+                generator.manual_seed(seed)
+                self.params[i] = torch.randn(5, generator=generator)
+        # 3. Otherwise, use a pre-generated pool of parameters.
+        else:
+            assert "params" in pool_dict, "Expected key 'params' in pool_dict."
+            indices = torch.randperm(len(pool_dict["params"]))[:batch_size]
+            self.params = pool_dict["params"][indices]
+
+    def evaluate(self, xs_b):
+        """
+        xs_b: a tensor of input values of shape (batch_size, n_dims).
+              For simplicity, we assume n_dims==1 so that we can compare scalar values.
+        Returns:
+            A tensor of evaluated outputs for each instance in the batch.
+        """
+        # Ensure xs_b is shaped (batch_size,) by removing the last dimension.
+        xs_b = xs_b.squeeze(-1)  # now shape is (batch_size,)
+
+        # Unpack parameters: each is of shape (batch_size,)
+        a = self.params[:, 0]
+        b = self.params[:, 1]
+        c = self.params[:, 2]
+        d = self.params[:, 3]
+        e = self.params[:, 4]
+
+        # Compute f(x) elementwise using the piecewise logic.
+        # torch.where operates elementwise on the tensors.
+        f_x = torch.where(xs_b < c, a * xs_b + b, d * xs_b + e)
+        
+        # Apply scaling and return
+        return self.scale * f_x
+
+    @staticmethod
+    def generate_pool_dict(n_dims, num_tasks, **kwargs):
+        """
+        Generate a pool of parameters to be shared between tasks.
+        Each task gets a vector of 5 parameters drawn from a standard normal distribution.
+        Returns:
+            A dictionary with key "params" and a tensor of shape (num_tasks, 5).
+        """
+        return {"params": torch.randn(num_tasks, 5)}
+
+    @staticmethod
+    def get_metric():
+        return squared_error
+
+    @staticmethod
+    def get_training_metric():
+        return mean_squared_error
+
+########################################################################
+# Example usage:
+########################################################################
+
+if __name__ == "__main__":
+    torch.manual_seed(282)
+    n_dims = 1
+    batch_size = 5
+    num_tasks = 100     # For generating a pool (if using pool_dict).
+    scale = 1           # Scaling factor for the function output.
+    task_factory = get_task_sampler(
+        "piecewise_linear_regression", n_dims, batch_size, num_tasks=num_tasks, scale=scale
+    )
+    piecewise_task = task_factory()
+    xs = torch.randn(batch_size, n_dims)
+    outputs = piecewise_task.evaluate(xs)
+    print("Input xs:", xs)
+    print("Output f(x):", outputs)
