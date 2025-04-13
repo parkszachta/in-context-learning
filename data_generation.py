@@ -164,20 +164,20 @@ class PiecewiseLinearRegression(Task):
 
     def evaluate(self, xs_b):
         """
-        xs_b: a tensor of input values of shape (batch_size, n_dims).
-              For simplicity, we assume n_dims==1 so that we can compare scalar values.
+        xs_b: a tensor of input values of shape (batch_size, n_points, n_dims).
+            For scalar inputs, n_dims should equal 1.
         Returns:
-            A tensor of evaluated outputs for each instance in the batch.
+            A tensor of outputs of shape (batch_size, n_points).
         """
-        # Ensure xs_b is shaped (batch_size,) by removing the last dimension.
+        # Remove the last dimension which is 1 for scalar inputs.
         xs_b = xs_b.squeeze(-1)  # now shape is (batch_size,)
 
-        # Unpack parameters: each is of shape (batch_size,)
-        a = self.params[:, 0]
-        b = self.params[:, 1]
-        c = self.params[:, 2]
-        d = self.params[:, 3]
-        e = self.params[:, 4]
+        # Unpack parameters: each is of shape (batch_size, 1)
+        a = self.params[:, 0].unsqueeze(1)
+        b = self.params[:, 1].unsqueeze(1)
+        c = self.params[:, 2].unsqueeze(1)
+        d = self.params[:, 3].unsqueeze(1)
+        e = self.params[:, 4].unsqueeze(1)
 
         # Compute f(x) elementwise using the piecewise logic.
         # torch.where operates elementwise on the tensors.
