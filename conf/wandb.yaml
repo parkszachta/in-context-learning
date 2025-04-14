@@ -1,0 +1,5 @@
+wandb:
+    project: in-context-training
+    entity: your-entity
+    notes: "Experiment with piecewise linear function."
+    log_every_steps: 100
