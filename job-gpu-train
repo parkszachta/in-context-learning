@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -C gpu
+#SBATCH -q debug
+#SBATCH -A mp309
+#SBATCH -t 00:30:00
+#SBATCH --gpus-per-node=4
+
+module load python
+conda activate in-context-learning
+python train.py --config conf/piecewise_scalar.yaml
