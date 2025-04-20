@@ -81,7 +81,8 @@ def get_task_sampler(
 ):
     task_names_to_classes = {
         "linear_regression": LinearRegression,
-        "piecewise_linear_regression": PiecewiseLinearRegression
+        "piecewise_linear_regression": PiecewiseLinearRegression,
+        "piecewise_linear_vector_regression": PiecewiseLinearVectorRegression
     }
     if task_name in task_names_to_classes:
         task_cls = task_names_to_classes[task_name]
@@ -204,6 +205,73 @@ class PiecewiseLinearRegression(Task):
     def get_training_metric():
         return mean_squared_error
 
+class PiecewiseLinearVectorRegression(Task):
+    def __init__(self, n_dims, batch_size, pool_dict=None, seeds=None, scale=1):
+        """
+        Implements a piecewise linear function for vector inputs:
+            f(x) = a*x+b if w*x < c and f(x)= d*x+e  otherwise.
+        Here: a, d, w are vectors; b, c, e are scalars.
+        scale: a constant factor to scale the predictions.
+        """
+        super().__init__(n_dims, batch_size, pool_dict, seeds)
+        self.scale = scale
+
+        # Total parameters per task: 3 vectors each of length n_dims, plus scalars b, c, e
+        total = 3 * n_dims + 3
+        if pool_dict is None and seeds is None:
+            self.params = torch.randn(batch_size, total)
+        elif seeds is not None:
+            self.params = torch.zeros(batch_size, total)
+            gen = torch.Generator()
+            assert len(seeds) == batch_size
+            for i, seed in enumerate(seeds):
+                gen.manual_seed(seed)
+                self.params[i] = torch.randn(total, generator=gen)
+        else:
+            assert "params" in pool_dict, "Expected key 'params' in pool_dict."
+            indices = torch.randperm(len(pool_dict["params"]))[:batch_size]
+            self.params = pool_dict["params"][indices]
+
+    def evaluate(self, xs_b):
+        """
+        xs_b: a tensor of input values of shape (batch_size, n_points, n_dims).
+        Returns:
+            tensor of shape (batch_size, n_points).
+        """
+        # a, d, w: shape (batch_size, 1, n_dims)
+        a = self.params[:, :self.n_dims].unsqueeze(1)
+        d = self.params[:, self.n_dims:2*self.n_dims].unsqueeze(1)
+        w = self.params[:, 2*self.n_dims:3*self.n_dims].unsqueeze(1)
+        # b, c, e: shape (batch_size, 1, 1)
+        b = self.params[:, 3*self.n_dims].view(-1,1,1)
+        c = self.params[:, 3*self.n_dims+1 ].view(-1,1,1)
+        e = self.params[:, 3*self.n_dims+2 ].view(-1,1,1)
+
+        # Compute dot products
+        # dot_w : shape (B, P, 1)
+        dot_w = (w * xs_b).sum(dim=-1, keepdim=True)
+        mask = dot_w < c
+        dot_a = (a * xs_b).sum(dim=-1, keepdim=True)
+        dot_d = (d * xs_b).sum(dim=-1, keepdim=True)
+
+        # Piecewise linear scalar output
+        f_x = torch.where(mask, dot_a + b, dot_d + e)
+        # Remove last dim to get (batch_size, n_points)
+        return (self.scale * f_x).squeeze(-1)
+
+    @staticmethod
+    def generate_pool_dict(n_dims, num_tasks, **kwargs):
+        total = 3 * n_dims + 3
+        return {"params": torch.randn(num_tasks, total)}
+
+    @staticmethod
+    def get_metric():
+        return squared_error
+
+    @staticmethod
+    def get_training_metric():
+        return mean_squared_error
+
 ########################################################################
 # Example usage:
 ########################################################################
@@ -222,3 +290,4 @@ if __name__ == "__main__":
     outputs = piecewise_task.evaluate(xs)
     print("Input xs:", xs)
     print("Output f(x):", outputs)
+
