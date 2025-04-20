@@ -1,5 +1,5 @@
 wandb:
     project: in-context-training
-    entity: qianyu2025
+    entity: qianyu2025-university-of-california-berkeley
     notes: "Experiment with piecewise linear function."
     log_every_steps: 100
