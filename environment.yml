@@ -1,5 +1,6 @@
 name: in-context-learning
 channels:
+  - conda-forge
   - pytorch
   - defaults
 dependencies:
@@ -20,3 +21,7 @@ dependencies:
     - wandb==0.12.11
     - xgboost==1.6.1
     - protobuf==3.20.1
+
+## need to install quinine and its dependencies manually
+#pip install quinine==0.3.0 --no-deps
+#pip install 'PyYAML>=6.0' Cerberus cytoolz funcy gin_config munch toposort
