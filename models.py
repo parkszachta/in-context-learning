@@ -14,13 +14,14 @@ from base_models import NeuralNetwork, ParallelNetworks
 
 def build_model(conf):
     if conf.family == "gpt2":
-        model = TransformerModel(
-            n_dims=conf.n_dims,
-            n_positions=conf.n_positions,
-            n_embd=conf.n_embd,
-            n_layer=conf.n_layer,
-            n_head=conf.n_head,
-        )
+        for name, cfg in model_configs.items():
+            model = TransformerModel(
+                n_dims=conf.n_dims,
+                n_positions=conf.n_positions,
+                n_embd=cfg["n_embd"],
+                n_layer=cfg["n_layer"],
+                n_head=cfg["n_head"],
+            )
     else:
         raise NotImplementedError
 

@@ -16,6 +16,8 @@ from models import build_model
 from data_generation import get_data_sampler, get_task_sampler
 import wandb
 
+import copy
+
 torch.backends.cudnn.benchmark = True
 
 
@@ -154,6 +156,7 @@ def main(args):
     model = build_model(args.model)
     model.cuda()
     model.train()
+    print(f"Total trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     train(model, args)
 
@@ -165,19 +168,41 @@ if __name__ == "__main__":
     parser = QuinineArgumentParser(schema=schema)
     args = parser.parse_quinfig()
     assert args.model.family in ["gpt2", "lstm"]
-    print(f"Running with: {args}")
+    model_configs = {
+        "1": {"n_embd": 8,   "n_layer": 1, "n_head": 1},
+        "2": {"n_embd": 12,  "n_layer": 1, "n_head": 1},
+        "3": {"n_embd": 16,  "n_layer": 1, "n_head": 2},
+        "4": {"n_embd": 24,  "n_layer": 2, "n_head": 2},
+        "5": {"n_embd": 32,  "n_layer": 3, "n_head": 4},
+        "6": {"n_embd": 48,  "n_layer": 3, "n_head": 4},
+        "7": {"n_embd": 64,  "n_layer": 3, "n_head": 4},
+        "8": {"n_embd": 96,  "n_layer": 4, "n_head": 8},
+        "9": {"n_embd": 128, "n_layer": 4, "n_head": 8},
+        "10": {"n_embd": 160, "n_layer": 5, "n_head": 10},
+    }
 
-    if not args.test_run:
-        run_id = args.training.resume_id
-        if run_id is None:
-            run_id = str(uuid.uuid4())
 
-        out_dir = os.path.join(args.out_dir, run_id)
-        if not os.path.exists(out_dir):
-            os.makedirs(out_dir)
-        args.out_dir = out_dir
+    for name, cfg in model_configs.items():
+        print(f"\n=== Running config: {name} ===")
 
-        with open(os.path.join(out_dir, "config.yaml"), "w") as yaml_file:
-            yaml.dump(args.__dict__, yaml_file, default_flow_style=False)
+        # Clone args to avoid mutating it across runs
+        import copy
+        run_args = copy.deepcopy(args)
 
-    main(args)
+        run_args.model.n_embd = cfg["n_embd"]
+        run_args.model.n_layer = cfg["n_layer"]
+        run_args.model.n_head = cfg["n_head"]
+
+        run_id = run_args.training.resume_id or str(uuid.uuid4())
+        out_dir = os.path.join(run_args.out_dir, f"{name}_{run_id}")
+        os.makedirs(out_dir, exist_ok=True)
+        run_args.out_dir = out_dir
+
+        if not run_args.test_run:
+            with open(os.path.join(out_dir, "config.yaml"), "w") as yaml_file:
+                yaml.dump(run_args.__dict__, yaml_file, default_flow_style=False)
+
+        # Override wandb run name to avoid conflict (optional)
+        run_args.wandb.name = f"{name}_{run_id}"
+
+        main(run_args)
