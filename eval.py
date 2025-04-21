@@ -10,11 +10,10 @@ import torch
 import yaml
 
 import models
-from samplers import get_data_sampler, sample_transformation
-from tasks import get_task_sampler
+from data_generation import get_data_sampler, sample_transformation, get_task_sampler
 
 
-def get_model_from_run(run_path, step=-1, only_conf=False):
+def get_model_from_run(run_path, step=-1, only_conf=False, DEVICE="cuda"):
     config_path = os.path.join(run_path, "config.yaml")
     with open(config_path) as fp:  # we don't Quinfig it to avoid inherits
         conf = Munch.fromDict(yaml.safe_load(fp))
@@ -25,14 +24,14 @@ def get_model_from_run(run_path, step=-1, only_conf=False):
 
     if step == -1:
         state_path = os.path.join(run_path, "state.pt")
-        state = torch.load(state_path)
+        state = torch.load(state_path,map_location=DEVICE)
         model.load_state_dict(state["model_state_dict"])
     else:
         model_path = os.path.join(run_path, f"model_{step}.pt")
-        state_dict = torch.load(model_path)
+        state_dict = torch.load(model_path,map_location=DEVICE)
         model.load_state_dict(state_dict)
 
-    return model, conf
+    return model.to(DEVICE), conf
 
 
 # Functions for evaluation
@@ -42,8 +41,8 @@ def eval_batch(model, task_sampler, xs, xs_p=None):
     task = task_sampler()
     if torch.cuda.is_available() and model.name.split("_")[0] in ["gpt2", "lstm"]:
         device = "cuda"
-    elif torch.backends.mps.is_built() and torch.backends.mps.is_available():
-        device = "mps"
+    # elif torch.backends.mps.is_built() and torch.backends.mps.is_available():
+    #     device = "mps"
     else:
         device = "cpu"
 
@@ -290,14 +289,17 @@ def compute_evals(all_models, evaluation_kwargs, save_path=None, recompute=False
 
 
 def get_run_metrics(
-    run_path, step=-1, cache=True, skip_model_load=False, skip_baselines=False
+    run_path, step=-1, cache=True, skip_model_load=False, skip_baselines=False,DEVICE="cuda"
 ):
     if skip_model_load:
-        _, conf = get_model_from_run(run_path, only_conf=True)
+        _, conf = get_model_from_run(run_path, only_conf=True,DEVICE=DEVICE)
         all_models = []
     else:
-        model, conf = get_model_from_run(run_path, step)
-        model = model.cuda().eval()
+        # model, conf = get_model_from_run(run_path, step)
+        # model = model.cuda().eval()
+        model, conf = get_model_from_run(run_path, step,DEVICE=DEVICE)
+        model = model.to(DEVICE).eval()        # stay on the chosen device
+
         all_models = [model]
         if not skip_baselines:
             all_models += models.get_relevant_baselines(conf.training.task)

@@ -53,6 +53,17 @@ def get_data_sampler(data_name, n_dims, **kwargs):
         print("Unknown sampler")
         raise NotImplementedError
 
+
+def sample_transformation(eigenvalues, normalize=False):
+    n_dims = len(eigenvalues)
+    U, _, _ = torch.linalg.svd(torch.randn(n_dims, n_dims))
+    t = U @ torch.diag(eigenvalues) @ torch.transpose(U, 0, 1)
+    if normalize:
+        norm_subspace = torch.sum(eigenvalues**2)
+        t *= math.sqrt(n_dims / norm_subspace)
+    return t
+
+
 class Task:
     def __init__(self, n_dims, batch_size, pool_dict=None, seeds=None):
         self.n_dims = n_dims

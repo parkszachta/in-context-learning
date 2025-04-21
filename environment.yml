@@ -1,13 +1,13 @@
 name: in-context-learning
 channels:
-  - conda-forge
+  # - conda-forge
   - pytorch
   - defaults
 dependencies:
   - pip=21.2.4
   - python=3.8.12
   - pytorch=1.11.0
-  - mkl==2024.0
+  - mkl<=2024.0
   - pip:
     - jupyter==1.0.0
     - matplotlib==3.5.2
@@ -25,3 +25,6 @@ dependencies:
 ## need to install quinine and its dependencies manually
 #pip install quinine==0.3.0 --no-deps
 #pip install 'PyYAML>=6.0' Cerberus cytoolz funcy gin_config munch toposort
+# mac: comment conda-forge mkl <= 2024.0
+# colab: conda-forge and mkl ==2024.0
+

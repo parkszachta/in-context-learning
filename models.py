@@ -7,7 +7,7 @@ from sklearn.linear_model import LogisticRegression, Lasso
 import warnings
 from sklearn import tree
 import xgboost as xgb
-
+from typing import Sequence, Optional
 from base_models import NeuralNetwork, ParallelNetworks
 
 ### adapted from the original code from 2022 paper
@@ -29,6 +29,16 @@ def build_model(conf):
 
 def get_relevant_baselines(task_name):
     task_to_baselines = {
+        "piecewise_linear_regression": [
+            (PiecewiseLeastSquaresModel, {}),
+            (NNModel, {"n_neighbors": 3}),
+            (AveragingModel, {}),
+        ],
+        "piecewise_linear_vector_regression": [
+            # (LeastSquaresModel, {}),
+            (NNModel, {"n_neighbors": 3}),
+            (AveragingModel, {}),
+        ],
         "linear_regression": [
             (LeastSquaresModel, {}),
             (NNModel, {"n_neighbors": 3}),
@@ -170,7 +180,132 @@ class NNModel:
 
         return torch.stack(preds, dim=1)
 
+# xs and ys should be on cpu for this method. Otherwise the output maybe off in case when train_xs is not full rank due to the implementation of torch.linalg.lstsq.
 
+class PiecewiseLeastSquaresModel:
+    r"""Piece‑wise linear predictor based on per‑step two‑region least squares.
+
+    For every time index *i* (>0) in a sequence of length *T*:
+        1. Draw `n_trials` random hyper‑plane cuts  (w, c).
+        2. Split the *prefix*  x[:, :i, :]  into two regions with that cut.
+        3. Fit an OLS regressor (with bias) in each region via `torch.linalg.lstsq`.
+        4. Predict  y[:, i]  with the regressor of the region that  x[:, i, :]  falls into.
+        5. Keep the split that yields the lowest batch MSE.
+    The first point (i = 0) is always predicted as 0.
+    """
+
+    def __init__(self, n_trials: int = 200):
+        self.n_trials = n_trials
+        self.name = f"Piecewise Least Square n_trials={n_trials}"
+
+    # --------------------------- helpers --------------------------- #
+    @staticmethod
+    def _ols(
+        X_pref:   torch.Tensor,   # (B, T, D)
+        y_pref:   torch.Tensor,   # (B, T)
+        x_i:      torch.Tensor,   # (B, 1, D)
+        y_i:      torch.Tensor,   # (B, 1)   <- not used here but often handy
+        mask_pref:torch.Tensor,   # (B, T, 1)  broadcastable to X_pref
+        mask_i:   torch.Tensor,   # (B, 1, 1)   boolean – True -> use "left" model
+    ) -> torch.Tensor:            # (B, 1)   predictions
+        """
+        Fits two affine regressors (left/right) **per batch item** and returns the
+        prediction for each `x_i[b]` from the regressor of its region.
+        """
+        device = X_pref.device
+        B, T, D = X_pref.shape
+        pred    = torch.empty_like(y_i)
+
+        # collapse the feature dimension of the mask so it's (B, T)
+        mask_time = mask_pref.squeeze(-1)  # (B, T)
+
+        for b in range(B):
+            # ---------- split prefix of this batch element ----------
+            left_mask  = mask_time[b]          # (T,)
+            right_mask = ~left_mask
+
+            X_left,  y_left  = X_pref[b, left_mask],  y_pref[b, left_mask] #  (N_left,  D), # (N_left,  )
+            X_right, y_right = X_pref[b, right_mask], y_pref[b, right_mask] # (N_right, D), # (N_right, )
+            X_pred = x_i[b, 0, :] # (D,)
+
+            # ---------- helper to fit (affine) OLS and predict ----------
+            def fit_and_pred(X, y, X_pred):
+                if X.numel() == 0:             # empty region → fallback
+                    return torch.zeros((), device=device)
+
+                X_b  = torch.cat([X,  torch.ones(X.size(0), 1, device=device)], dim=-1)  # (N, D+1)
+                xq_b = torch.cat([X_pred, torch.ones(1, device=device)],dim=-1).unsqueeze(0)  # (1, D+1)
+                w, *_ = torch.linalg.lstsq(X_b, y.unsqueeze(1))  # (D+1, 1)
+                return (xq_b @ w).squeeze()
+
+            p_left  = fit_and_pred(X_left,  y_left, X_pred)
+            p_right = fit_and_pred(X_right, y_right, X_pred)
+
+            pred[b] = p_left if mask_i[b, 0, 0] else p_right
+
+        return pred
+
+    # --------------------------- forward --------------------------- #
+    @torch.no_grad()
+    def __call__(
+        self,
+        xs: torch.Tensor,      # (B, T, D)
+        ys: torch.Tensor,      # (B, T)
+        inds: Optional[Sequence[int]] = None   # time indices to predict
+    ) -> torch.Tensor:         # (B, len(inds))
+        if inds is None:
+            inds = range(xs.size(1))
+
+        # basic sanity
+        if len(inds) == 0 or min(inds) < 0 or max(inds) >= xs.size(1):
+            raise ValueError("inds out of range")
+
+        B, T, D = xs.shape
+        device  = xs.device
+        preds   = torch.zeros(B, len(inds), device=device)
+
+        for col, i in enumerate(inds):
+            if i == 0:                      # spec: predict zero on first point
+                continue
+
+            # prefix as flat matrices  (B*i, D)  and  (B*i,)
+            X_pref = xs[:, :i, :] #(B, i, D)
+            y_pref = ys[:, :i   ] #(B, i)
+
+            x_i    = xs[:, i, :].unsqueeze(1)           # (B, 1, D) – query points
+            y_i    = ys[:, i].unsqueeze(1)               # (B, 1)   – ground truth
+
+            best_mse = torch.inf
+            best_pred = torch.zeros_like(y_i)
+
+            for _ in range(self.n_trials):
+                # random cut per batch element
+                w_i = torch.randn(B, D, device=device).unsqueeze(1)     # (B,1,D)
+                c_i = torch.rand(B, 1, device=device).unsqueeze(1)      # (B,1,1)
+
+                w_pref  = w_i.repeat_interleave(i, dim=0).reshape(B, i, D)   # (B, i, n_dim)
+                c_pref  = c_i.repeat_interleave(i, dim=0).reshape(B, i, 1)   # (B, i, 1)
+
+                # row‑wise dot product with the matching w and comparison with c
+                # project and split prefix
+                proj_pref   = (X_pref * w_pref).sum(dim=-1, keepdim=True)      # (B,i, 1)
+                mask_pref   = (proj_pref < c_pref)              # # (B,i, 1) boolean
+                proj_i    = (x_i     * w_i).sum(dim=-1, keepdim=True)               # (B,1,1)
+                mask_i    = (proj_i    < c_i)              # (B,1,1)
+
+                # fit two OLS models
+                pred  = self._ols(X_pref,  y_pref, x_i, y_i, mask_pref, mask_i)
+                mse = torch.mean((pred - y_i) ** 2)
+                if mse < best_mse:
+                    best_mse = mse
+                    best_pred = pred
+
+            preds[:, col] = best_pred.squeeze(-1)
+
+        return preds
+
+
+    
 # xs and ys should be on cpu for this method. Otherwise the output maybe off in case when train_xs is not full rank due to the implementation of torch.linalg.lstsq.
 class LeastSquaresModel:
     def __init__(self, driver=None):
