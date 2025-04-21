@@ -35,7 +35,7 @@ def get_relevant_baselines(task_name):
             (AveragingModel, {}),
         ],
         "piecewise_linear_vector_regression": [
-            # (LeastSquaresModel, {}),
+            (PiecewiseLeastSquaresModel, {}),
             (NNModel, {"n_neighbors": 3}),
             (AveragingModel, {}),
         ],
@@ -194,7 +194,7 @@ class PiecewiseLeastSquaresModel:
     The first point (i = 0) is always predicted as 0.
     """
 
-    def __init__(self, n_trials: int = 200):
+    def __init__(self, n_trials: int = 2000):
         self.n_trials = n_trials
         self.name = f"Piecewise Least Square n_trials={n_trials}"
 
