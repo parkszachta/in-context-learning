@@ -1,11 +1,12 @@
 #!/bin/bash
+#SBATCH -J piecewise_vector
 #SBATCH -N 1
 #SBATCH -C gpu
 #SBATCH -q regular
 #SBATCH -A mp309
-#SBATCH -t 02:00:00
+#SBATCH -t 08:00:00
 #SBATCH --gpus-per-node=4
 
 module load python
 conda activate in-context-learning
-python train.py --config conf/piecewise_scalar.yaml
+python train.py --config conf/piecewise_vector.yaml

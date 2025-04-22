@@ -11,11 +11,19 @@ palette = sns.color_palette("colorblind")
 
 
 relevant_model_names = {
+    'piecewise_linear_vector_regression': [
+        # "Transformer",
+        "Transformer-xs",
+        "Piecewise Least Square n_trials=2000",
+        "3-Nearest Neighbors",
+        # "Averaging",
+    ],
     'piecewise_linear_regression': [
         "Transformer",
+        # "Transformer-xs",
         "Piecewise Least Square n_trials=200",
         "3-Nearest Neighbors",
-        "Averaging",
+        # "Averaging",
     ],
     "linear_regression": [
         "Transformer",
@@ -63,7 +71,7 @@ def basic_plot(metrics, models=None, trivial=1.0):
     ax.set_xlabel("in-context examples")
     ax.set_ylabel("squared error")
     ax.set_xlim(-1, len(low) + 0.1)
-    # ax.set_ylim(-0.1, 1.25)
+    ax.set_ylim(-0.1, 1.5)
 
     legend = ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
     fig.set_size_inches(4, 3)
@@ -100,6 +108,8 @@ def collect_results(run_dir, df, valid_row=None, rename_eval=None, rename_model=
                 xlim = 2 * n_dims + 1
                 if r.task in ["relu_2nn_regression", "decision_tree", "piecewise_linear_regression"]:
                     xlim = 200
+                if r.task in ["piecewise_linear_vector_regression"]:
+                    xlim = 500
 
                 normalization = n_dims
                 if r.task == "sparse_linear_regression":
