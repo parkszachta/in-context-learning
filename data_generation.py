@@ -359,7 +359,7 @@ class PiecewiseLinearVectorRegressionMultiPivot(Task):
         a = self.params[:, :self.n_dims].unsqueeze(1)
         b = self.params[:, (self.n_pivots+2)*self.n_dims].view(-1, 1, 1)
         c = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots + 1].view(-1, 1, 1)
-        mask = dot_w < c
+        mask = (dot_w < c).repeat(1, 1, self.n_dims)
         f_x[mask] = (a * xs_b)[mask].sum(dim=-1, keepdim=True) + b[mask]
         
         # Handle middle pieces
@@ -368,14 +368,14 @@ class PiecewiseLinearVectorRegressionMultiPivot(Task):
             b = self.params[:, (self.n_pivots+2)*self.n_dims + i].view(-1, 1, 1)
             c_prev = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots + i].view(-1, 1, 1)
             c_next = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots + i + 1].view(-1, 1, 1)
-            mask = (dot_w >= c_prev) & (dot_w < c_next)
+            mask = (dot_w >= c_prev) & (dot_w < c_next).repeat(1, 1, self.n_dims)
             f_x[mask] = (a * xs_b)[mask].sum(dim=-1, keepdim=True) + b[mask]
         
         # Handle last piece (w*x >= c_k)
         a = self.params[:, self.n_pivots*self.n_dims:(self.n_pivots+1)*self.n_dims].unsqueeze(1)
         b = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots].view(-1, 1, 1)
         c = self.params[:, -1].view(-1, 1, 1)
-        mask = dot_w >= c
+        mask = dot_w >= c.repeat(1, 1, self.n_dims)
         f_x[mask] = (a * xs_b)[mask].sum(dim=-1, keepdim=True) + b[mask]
         
         # Remove last dim to get (batch_size, n_points)
