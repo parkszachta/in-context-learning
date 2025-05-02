@@ -359,24 +359,33 @@ class PiecewiseLinearVectorRegressionMultiPivot(Task):
         a = self.params[:, :self.n_dims].unsqueeze(1)
         b = self.params[:, (self.n_pivots+2)*self.n_dims].view(-1, 1, 1)
         c = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots + 1].view(-1, 1, 1)
-        mask = (dot_w < c).repeat(1, 1, self.n_dims)
-        f_x[mask] = (a * xs_b)[mask].sum(dim=-1, keepdim=True) + b[mask]
+        # mask_scalar = (dot_w < c).repeat(1, 1, self.n_dims)
+        mask = (dot_w < c)
+        b = b.repeat(1, n_points, 1)
+        # print(b.shape)
+        # print(mask_scalar.shape)
+        # print(mask.shape)
+        # print((a * xs_b).shape)
+        # print((a * xs_b).sum(dim=-1, keepdim=True).shape)
+        f_x[mask] = (a * xs_b).sum(dim=-1, keepdim=True)[mask] + b[mask]
         
         # Handle middle pieces
         for i in range(1, self.n_pivots):
             a = self.params[:, i*self.n_dims:(i+1)*self.n_dims].unsqueeze(1)
             b = self.params[:, (self.n_pivots+2)*self.n_dims + i].view(-1, 1, 1)
+            b = b.repeat(1, n_points, 1)
             c_prev = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots + i].view(-1, 1, 1)
             c_next = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots + i + 1].view(-1, 1, 1)
-            mask = (dot_w >= c_prev) & (dot_w < c_next).repeat(1, 1, self.n_dims)
-            f_x[mask] = (a * xs_b)[mask].sum(dim=-1, keepdim=True) + b[mask]
+            mask = (dot_w >= c_prev) & (dot_w < c_next)
+            f_x[mask] = (a * xs_b).sum(dim=-1, keepdim=True)[mask] + b[mask]
         
         # Handle last piece (w*x >= c_k)
         a = self.params[:, self.n_pivots*self.n_dims:(self.n_pivots+1)*self.n_dims].unsqueeze(1)
         b = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots].view(-1, 1, 1)
+        b = b.repeat(1, n_points, 1)
         c = self.params[:, -1].view(-1, 1, 1)
-        mask = dot_w >= c.repeat(1, 1, self.n_dims)
-        f_x[mask] = (a * xs_b)[mask].sum(dim=-1, keepdim=True) + b[mask]
+        mask = dot_w >= c
+        f_x[mask] = (a * xs_b).sum(dim=-1, keepdim=True)[mask] + b[mask]
         
         # Remove last dim to get (batch_size, n_points)
         return (self.scale * f_x).squeeze(-1)
