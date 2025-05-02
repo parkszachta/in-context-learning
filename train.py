@@ -50,12 +50,14 @@ def train(model, args):
             curriculum.update()
 
     n_dims = model.n_dims
+    n_pivots = args.training.get('n_pivots', None)
     bsize = args.training.batch_size
     data_sampler = get_data_sampler(args.training.data, n_dims=n_dims)
     task_sampler = get_task_sampler(
         args.training.task,
         n_dims,
         bsize,
+        n_pivots,
         num_tasks=args.training.num_tasks,
         **args.training.task_kwargs,
     )

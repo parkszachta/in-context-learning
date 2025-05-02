@@ -88,12 +88,13 @@ class Task:
         raise NotImplementedError
 
 def get_task_sampler(
-    task_name, n_dims, batch_size, pool_dict=None, num_tasks=None, **kwargs
+    task_name, n_dims, batch_size, n_pivots=None, pool_dict=None, num_tasks=None, **kwargs
 ):
     task_names_to_classes = {
         "linear_regression": LinearRegression,
         "piecewise_linear_regression": PiecewiseLinearRegression,
-        "piecewise_linear_vector_regression": PiecewiseLinearVectorRegression
+        "piecewise_linear_vector_regression": PiecewiseLinearVectorRegression,
+        "piecewise_linear_vector_regression_multi_pivot": PiecewiseLinearVectorRegressionMultiPivot
     }
     if task_name in task_names_to_classes:
         task_cls = task_names_to_classes[task_name]
@@ -101,7 +102,10 @@ def get_task_sampler(
             if pool_dict is not None:
                 raise ValueError("Either pool_dict or num_tasks should be None.")
             pool_dict = task_cls.generate_pool_dict(n_dims, num_tasks, **kwargs)
-        return lambda **args: task_cls(n_dims, batch_size, pool_dict, **args, **kwargs)
+        if n_pivots is not None:
+            return lambda **args: task_cls(n_dims, batch_size, n_pivots, pool_dict, **args, **kwargs)
+        else:
+            return lambda **args: task_cls(n_dims, batch_size, pool_dict, **args, **kwargs)
     else:
         print("Unknown task")
         raise NotImplementedError
@@ -274,6 +278,118 @@ class PiecewiseLinearVectorRegression(Task):
     def generate_pool_dict(n_dims, num_tasks, **kwargs):
         total = 3 * n_dims + 3
         return {"params": torch.randn(num_tasks, total)}
+
+    @staticmethod
+    def get_metric():
+        return squared_error
+
+    @staticmethod
+    def get_training_metric():
+        return mean_squared_error
+    
+
+
+class PiecewiseLinearVectorRegressionMultiPivot(Task):
+    def __init__(self, n_dims, batch_size, n_pivots=2, pool_dict=None, seeds=None, scale=1):
+        """
+        Implements a piecewise linear function for vector inputs with multiple pivot points:
+            f(x) = a_1*x + b_1 if w*x < c_1
+            f(x) = a_2*x + b_2 if c_1 <= w*x < c_2
+            ...
+            f(x) = a_k*x + b_k if w*x >= c_{k-1}
+        Here: a_i, w are vectors; b_i, c_i are scalars.
+        n_pivots: number of pivot points (resulting in n_pivots+1 pieces)
+        scale: a constant factor to scale the predictions.
+        """
+        super().__init__(n_dims, batch_size, pool_dict, seeds)
+        self.scale = scale
+        self.n_pivots = n_pivots
+        
+        # Total parameters per task: 
+        # - (n_pivots + 1) vectors a_i of length n_dims for each piece
+        # - 1 vector w of length n_dims
+        # - (n_pivots + 1) scalars b_i for each piece
+        # - n_pivots scalars c_i for pivot points
+        total = (n_pivots + 1) * n_dims + n_dims + (n_pivots + 1) + n_pivots
+
+        if pool_dict is None and seeds is None:
+            self.params = torch.randn(batch_size, total)
+            # Sort the pivot points
+            pivot_start = (n_pivots + 2) * n_dims + (n_pivots + 1)
+            pivot_end = pivot_start + n_pivots
+            self.params[:, pivot_start:pivot_end], _ = torch.sort(self.params[:, pivot_start:pivot_end], dim=1)
+        elif seeds is not None:
+            self.params = torch.zeros(batch_size, total)
+            gen = torch.Generator()
+            assert len(seeds) == batch_size
+            for i, seed in enumerate(seeds):
+                gen.manual_seed(seed)
+                params = torch.randn(total, generator=gen)
+                # Sort the pivot points
+                pivot_start = (n_pivots + 2) * n_dims + (n_pivots + 1)
+                pivot_end = pivot_start + n_pivots
+                params[pivot_start:pivot_end], _ = torch.sort(params[pivot_start:pivot_end])
+                self.params[i] = params
+        else:
+            assert "params" in pool_dict, "Expected key 'params' in pool_dict."
+            indices = torch.randperm(len(pool_dict["params"]))[:batch_size]
+            self.params = pool_dict["params"][indices]
+
+    def evaluate(self, xs_b):
+        """
+        xs_b: a tensor of input values of shape (batch_size, n_points, n_dims).
+        Returns:
+            tensor of shape (batch_size, n_points).
+        """
+        batch_size = xs_b.shape[0]
+        n_points = xs_b.shape[1]
+
+        # Extract parameters
+        # w: shape (batch_size, 1, n_dims)
+        w = self.params[:, self.n_dims*(self.n_pivots+1):self.n_dims*(self.n_pivots+2)].unsqueeze(1)
+        
+        # Compute w*x for all points
+        # dot_w: shape (batch_size, n_points, 1)
+        dot_w = (w * xs_b).sum(dim=-1, keepdim=True)
+        
+        # Initialize output tensor
+        f_x = torch.zeros(batch_size, n_points, 1, device=xs_b.device)
+        
+        # Handle first piece (w*x < c_1)
+        a = self.params[:, :self.n_dims].unsqueeze(1)
+        b = self.params[:, (self.n_pivots+2)*self.n_dims].view(-1, 1, 1)
+        c = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots + 1].view(-1, 1, 1)
+        mask = dot_w < c
+        f_x[mask] = (a * xs_b)[mask].sum(dim=-1, keepdim=True) + b[mask]
+        
+        # Handle middle pieces
+        for i in range(1, self.n_pivots):
+            a = self.params[:, i*self.n_dims:(i+1)*self.n_dims].unsqueeze(1)
+            b = self.params[:, (self.n_pivots+2)*self.n_dims + i].view(-1, 1, 1)
+            c_prev = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots + i].view(-1, 1, 1)
+            c_next = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots + i + 1].view(-1, 1, 1)
+            mask = (dot_w >= c_prev) & (dot_w < c_next)
+            f_x[mask] = (a * xs_b)[mask].sum(dim=-1, keepdim=True) + b[mask]
+        
+        # Handle last piece (w*x >= c_k)
+        a = self.params[:, self.n_pivots*self.n_dims:(self.n_pivots+1)*self.n_dims].unsqueeze(1)
+        b = self.params[:, (self.n_pivots+2)*self.n_dims + self.n_pivots].view(-1, 1, 1)
+        c = self.params[:, -1].view(-1, 1, 1)
+        mask = dot_w >= c
+        f_x[mask] = (a * xs_b)[mask].sum(dim=-1, keepdim=True) + b[mask]
+        
+        # Remove last dim to get (batch_size, n_points)
+        return (self.scale * f_x).squeeze(-1)
+
+    @staticmethod
+    def generate_pool_dict(n_dims, num_tasks, n_pivots=2, **kwargs):
+        total = (n_pivots + 1) * n_dims + n_dims + (n_pivots + 1) + n_pivots
+        params = torch.randn(num_tasks, total)
+        # Sort the pivot points
+        pivot_start = (n_pivots + 2) * n_dims + (n_pivots + 1)
+        pivot_end = pivot_start + n_pivots
+        params[:, pivot_start:pivot_end], _ = torch.sort(params[:, pivot_start:pivot_end], dim=1)
+        return {"params": params}
 
     @staticmethod
     def get_metric():

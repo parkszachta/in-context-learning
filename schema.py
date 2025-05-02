@@ -46,6 +46,7 @@ training_schema = {
     "num_training_examples": merge(tinteger, nullable, default(None)),
     "data": merge(tstring, allowed(["gaussian"])),
     "batch_size": merge(tinteger, default(64)),
+    "n_pivots": merge(tinteger, nullable, default(None)),
     "learning_rate": merge(tfloat, default(3e-4)),
     "train_steps": merge(tinteger, default(1000)),
     "save_every_steps": merge(tinteger, default(1000)),  # how often to checkpoint
