@@ -37,6 +37,7 @@ curriculum_schema = {
 TASK_LIST = [
     "piecewise_linear_regression",
     "piecewise_linear_vector_regression",
+    "piecewise_linear_vector_regression_multi_pivot",
 ]
 
 training_schema = {
