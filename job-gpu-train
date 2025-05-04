@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J piecewise_vector
+#SBATCH -J piecewise_vector_multiple_pivot
 #SBATCH -N 1
 #SBATCH -C gpu
 #SBATCH -q regular
@@ -9,4 +9,4 @@
 
 module load python
 conda activate in-context-learning
-python train.py --config conf/piecewise_vector.yaml
+python train.py --config conf/piecewise_vector_multiple_pivot.yaml
