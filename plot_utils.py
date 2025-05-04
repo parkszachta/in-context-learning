@@ -11,6 +11,14 @@ palette = sns.color_palette("colorblind")
 
 
 relevant_model_names = {
+    'piecewise_linear_vector_regression_multi_pivot': [
+        # "Transformer",
+        "Transformer-xs",
+        # "Greedy Tree Learning",
+        "XGBoost",
+        "3-Nearest Neighbors",
+        # "Averaging",
+    ],
     'piecewise_linear_vector_regression': [
         # "Transformer",
         "Transformer-xs",
@@ -110,6 +118,8 @@ def collect_results(run_dir, df, valid_row=None, rename_eval=None, rename_model=
                     xlim = 200
                 if r.task in ["piecewise_linear_vector_regression"]:
                     xlim = 500
+                if r.task in ["piecewise_linear_vector_regression_multi_pivot"]:
+                    xlim = 750
 
                 normalization = n_dims
                 if r.task == "sparse_linear_regression":

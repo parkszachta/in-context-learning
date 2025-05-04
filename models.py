@@ -35,7 +35,13 @@ def get_relevant_baselines(task_name):
             (AveragingModel, {}),
         ],
         "piecewise_linear_vector_regression": [
-            (PiecewiseLeastSquaresModel, {"n_trials": 2000}),
+            # (PiecewiseLeastSquaresModel, {"n_trials": 2000}),
+            (NNModel, {"n_neighbors": 3}),
+            (AveragingModel, {}),
+        ],
+        "piecewise_linear_vector_regression_multi_pivot": [
+            (DecisionTreeModel, {"max_depth": 50}),
+            (XGBoostModel, {}),
             (NNModel, {"n_neighbors": 3}),
             (AveragingModel, {}),
         ],
@@ -304,7 +310,6 @@ class PiecewiseLeastSquaresModel:
 
         return preds
 
-
     
 # xs and ys should be on cpu for this method. Otherwise the output maybe off in case when train_xs is not full rank due to the implementation of torch.linalg.lstsq.
 class LeastSquaresModel:
@@ -365,6 +370,8 @@ class AveragingModel:
             preds.append(pred[:, 0, 0])
 
         return torch.stack(preds, dim=1)
+
+
 
 
 # Lasso regression (for sparse linear regression).

@@ -310,6 +310,8 @@ class PiecewiseLinearVectorRegressionMultiPivot(Task):
         # - 1 vector w of length n_dims
         # - (n_pivots + 1) scalars b_i for each piece
         # - n_pivots scalars c_i for pivot points
+        # print("n_pivots: ", n_pivots)
+
         total = (n_pivots + 1) * n_dims + n_dims + (n_pivots + 1) + n_pivots
 
         if pool_dict is None and seeds is None:

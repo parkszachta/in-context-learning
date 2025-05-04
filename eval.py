@@ -155,6 +155,7 @@ def eval_model(
     data_name,
     n_dims,
     n_points,
+    n_pivots,
     prompting_strategy,
     num_eval_examples=1280,
     batch_size=64,
@@ -173,7 +174,7 @@ def eval_model(
     assert num_eval_examples % batch_size == 0
     data_sampler = get_data_sampler(data_name, n_dims, **data_sampler_kwargs)
     task_sampler = get_task_sampler(
-        task_name, n_dims, batch_size, **task_sampler_kwargs
+        task_name, n_dims, batch_size, n_pivots, **task_sampler_kwargs
     )
 
     all_metrics = []
@@ -194,6 +195,7 @@ def build_evals(conf):
     n_dims = conf.model.n_dims
     n_points = conf.training.curriculum.points.end
     batch_size = conf.training.batch_size
+    n_pivots = conf.training.get('n_pivots', None)
 
     task_name = conf.training.task
     data_name = conf.training.data
@@ -204,6 +206,7 @@ def build_evals(conf):
         "n_points": n_points,
         "batch_size": batch_size,
         "data_name": data_name,
+        "n_pivots": n_pivots,
         "prompting_strategy": "standard",
     }
 
