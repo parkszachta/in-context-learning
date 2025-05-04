@@ -9,6 +9,7 @@ from sklearn import tree
 import xgboost as xgb
 from typing import Sequence, Optional
 from base_models import NeuralNetwork, ParallelNetworks
+from model_configs import model_configs
 
 ### adapted from the original code from 2022 paper
 
