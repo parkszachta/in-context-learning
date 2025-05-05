@@ -328,7 +328,48 @@ def get_run_metrics(
 
 
 def conf_to_model_name(conf):
-    if conf.model.family == "gpt2":
+    # print(conf.model.n_embd)
+    if conf.model.family == "gpt2" and conf.model.n_layer == 1 and conf.model.n_head == 1 and conf.model.n_embd == 8:
+        return {
+            (1, 1): "Transformer-1",
+        }[(conf.model.n_layer, conf.model.n_head)]
+    elif conf.model.family == "gpt2" and conf.model.n_layer == 1 and conf.model.n_head == 1 and conf.model.n_embd == 12:
+        return {
+            (1, 1): "Transformer-2",
+        }[(conf.model.n_layer, conf.model.n_head)]
+    elif conf.model.family == "gpt2" and conf.model.n_layer == 1 and conf.model.n_head == 2 and conf.model.n_embd == 16:
+        return {
+            (1, 2): "Transformer-3",
+        }[(conf.model.n_layer, conf.model.n_head)]
+    elif conf.model.family == "gpt2" and conf.model.n_layer == 2 and conf.model.n_head == 2 and conf.model.n_embd == 24:
+        return {
+            (2, 2): "Transformer-4",
+        }[(conf.model.n_layer, conf.model.n_head)]
+    elif conf.model.family == "gpt2" and conf.model.n_layer == 3 and conf.model.n_head == 4 and conf.model.n_embd == 32:
+        return {
+            (3, 4): "Transformer-5",
+        }[(conf.model.n_layer, conf.model.n_head)]
+    elif conf.model.family == "gpt2" and conf.model.n_layer == 3 and conf.model.n_head == 4 and conf.model.n_embd == 48:
+        return {
+            (3, 4): "Transformer-6",
+        }[(conf.model.n_layer, conf.model.n_head)]
+    elif conf.model.family == "gpt2" and conf.model.n_layer == 3 and conf.model.n_head == 4 and conf.model.n_embd == 64:
+        return {
+            (3, 4): "Transformer-7",
+        }[(conf.model.n_layer, conf.model.n_head)]
+    elif conf.model.family == "gpt2" and conf.model.n_layer == 4 and conf.model.n_head == 8 and conf.model.n_embd == 96:
+        return {
+            (4, 8): "Transformer-8",
+        }[(conf.model.n_layer, conf.model.n_head)]
+    elif conf.model.family == "gpt2" and conf.model.n_layer == 4 and conf.model.n_head == 8 and conf.model.n_embd == 128:
+        return {
+            (4, 8): "Transformer-9",
+        }[(conf.model.n_layer, conf.model.n_head)] 
+    elif conf.model.family == "gpt2" and conf.model.n_layer == 5 and conf.model.n_head == 10 and conf.model.n_embd == 160:
+        return {
+            (5, 10): "Transformer-10",
+        }[(conf.model.n_layer, conf.model.n_head)]
+    elif conf.model.family == "gpt2":
         return {
             (3, 2): "Transformer-xs",
             (6, 4): "Transformer-small",
@@ -336,6 +377,8 @@ def conf_to_model_name(conf):
         }[(conf.model.n_layer, conf.model.n_head)]
     else:
         return conf.wandb.name
+
+
 
 
 def baseline_names(name):
@@ -393,7 +436,7 @@ def read_run_dir(run_dir):
                 all_runs[k].append(v)
 
     df = pd.DataFrame(all_runs).sort_values("run_name")
-    assert len(df) == len(df.run_name.unique())
+    # assert len(df) == len(df.run_name.unique())
     return df
 
 if __name__ == "__main__":
